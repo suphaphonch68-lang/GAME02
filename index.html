@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ROBO DELIVERY : หุ่นจิ๋วส่งของ ฝ่าด่านคำสั่ง</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700&display=swap');
+        
+        body {
+            font-family: 'Kanit', sans-serif;
+            background-color: #f0fdf4; /* Light green background */
+            overscroll-behavior: none;
+        }
+
+        /* Game Board Grid */
+        #game-board {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            gap: 2px;
+            background-color: #d1d5db;
+            border: 4px solid #4b5563;
+            border-radius: 8px;
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cell {
+            background-color: #ffffff;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        .cell.wall { background-color: #6b7280; background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, #4b5563 10px, #4b5563 20px); }
+        .cell.switch { background-color: #fecaca; border: 2px solid #ef4444; border-radius: 50%; width: 80%; height: 80%; margin: 10%; box-shadow: inset 0 2px 4px rgba(0,0,0,0.3); }
+        .cell.switch-active { background-color: #ef4444; box-shadow: none; }
+        .cell.door { background-color: #9ca3af; border: 4px solid #374151; background-image: repeating-linear-gradient(90deg, transparent, transparent 5px, #374151 5px, #374151 10px); }
+        .cell.door-open { opacity: 0.2; }
+        .cell.dest { border: 2px dashed #10b981; background-color: #d1fae5; border-radius: 8px; }
+
+        /* Entities */
+        .entity {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            transition: all 0.3s ease-in-out;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+
+        #robot {
+            z-index: 20;
+            transition: top 0.3s ease, left 0.3s ease, transform 0.3s ease;
+        }
+
+        .package {
+            width: 70%;
+            height: 70%;
+            background-color: #d97706;
+            border: 2px solid #92400e;
+            border-radius: 4px;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-weight: bold;
+            font-size: 0.8rem;
+        }
+        
+        .package::before {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 2px;
+            background: #92400e;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        /* Commands Queue */
+        .command-block {
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+            user-select: none;
+        }
+        .command-block:hover { transform: translateY(-2px); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .command-block:active { transform: translateY(0); }
+        
+        .cmd-active {
+            border: 2px solid #ef4444 !important;
+            box-shadow: 0 0 10px #ef4444 !important;
+            transform: scale(1.05);
+        }
+
+        /* Animations */
+        @keyframes bump {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); background-color: #fecaca; }
+            100% { transform: scale(1); }
+        }
+        .bump-anim { animation: bump 0.3s ease; }
+
+        @keyframes successPop {
+            0% { transform: scale(0.5); opacity: 0; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .success-anim { animation: successPop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) both; }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.5);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex flex-col text-gray-800">
+
+    <!-- Header -->
+    <header class="bg-blue-600 text-white p-3 shadow-md flex justify-between items-center z-50">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center p-1">
+                <!-- Robot Head Icon -->
+                <svg viewBox="0 0 100 100" class="w-full h-full text-blue-600">
+                    <rect x="20" y="20" width="60" height="60" rx="15" fill="currentColor"/>
+                    <circle cx="35" cy="45" r="8" fill="white"/><circle cx="65" cy="45" r="8" fill="white"/>
+                    <rect x="35" y="65" width="30" height="6" rx="3" fill="white"/>
+                </svg>
+            </div>
+            <h1 class="text-xl md:text-2xl font-bold tracking-wide">ROBO DELIVERY</h1>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="toggleModal('ct-guide-modal')" class="bg-blue-500 hover:bg-blue-400 px-3 py-1.5 rounded-lg text-sm font-semibold transition flex items-center gap-1 shadow">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <span class="hidden md:inline">คู่มือ CT</span>
+            </button>
+            <select id="level-select" onchange="loadLevel(this.value)" class="bg-white text-blue-600 px-3 py-1.5 rounded-lg text-sm font-semibold shadow outline-none cursor-pointer">
+                <option value="1">Level 1: พื้นฐาน</option>
+                <option value="2">Level 2: หลบหลีก</option>
+                <option value="3">Level 3: งานเยอะ</option>
+                <option value="4">Level 4: กลไกประตู</option>
+                <option value="5">Level 5: วนซ้ำ (Loop)</option>
+                <option value="editor">🛠️ Level Editor</option>
+            </select>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col md:flex-row overflow-hidden">
+        
+        <!-- Left: Game Area -->
+        <section class="w-full md:w-1/2 lg:w-3/5 p-4 flex flex-col items-center justify-center bg-emerald-50">
+            <div class="w-full max-w-md relative">
+                <!-- Status Bar -->
+                <div class="flex justify-between items-center mb-2 px-1">
+                    <span id="level-title" class="font-bold text-lg text-emerald-800">Level 1</span>
+                    <div class="flex gap-1 text-yellow-400 text-xl" id="star-display">
+                        <!-- Stars injected here -->
+                    </div>
+                </div>
+
+                <!-- Game Board Container -->
+                <div id="game-board-container" class="relative w-full shadow-xl rounded-lg bg-white p-2">
+                    <div id="game-board">
+                        <!-- Cells and Entities injected here via JS -->
+                    </div>
+                    
+                    <!-- SVG Robot Entity (Absolute positioning managed by JS) -->
+                    <div id="robot" class="entity" style="top: 0; left: 0; transform: rotate(0deg);">
+                        <svg viewBox="0 0 100 100" class="w-4/5 h-4/5 drop-shadow-md">
+                            <rect x="15" y="15" width="70" height="70" rx="15" fill="#3B82F6"/>
+                            <!-- Antenna -->
+                            <rect x="47" y="0" width="6" height="15" fill="#9CA3AF"/>
+                            <circle cx="50" cy="0" r="5" fill="#EF4444"/>
+                            <!-- Eyes -->
+                            <circle cx="35" cy="40" r="10" fill="white"/>
+                            <circle cx="65" cy="40" r="10" fill="white"/>
+                            <circle cx="35" cy="40" r="4" fill="#1E3A8A"/>
+                            <circle cx="65" cy="40" r="4" fill="#1E3A8A"/>
+                            <!-- Direction Indicator (Nose) -->
+                            <polygon points="50,25 55,35 45,35" fill="#FBBF24"/>
+                            <!-- Wheels -->
+                            <rect x="5" y="25" width="10" height="50" rx="5" fill="#1F2937"/>
+                            <rect x="85" y="25" width="10" height="50" rx="5" fill="#1F2937"/>
+                            <!-- Holding Package Indicator -->
+                            <g id="robot-package" class="hidden">
+                                <rect x="30" y="55" width="40" height="30" rx="4" fill="#D97706" stroke="#92400E" stroke-width="2"/>
+                                <line x1="30" y1="70" x2="70" y2="70" stroke="#92400E" stroke-width="2"/>
+                            </g>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Execution Controls -->
+                <div class="mt-4 flex flex-wrap justify-center gap-2 w-full glass-panel p-3 rounded-xl">
+                    <button onclick="startGame()" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-bold shadow transition flex items-center gap-1">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"></path></svg> รัน
+                    </button>
+                    <button onclick="stepGame()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-bold shadow transition flex items-center gap-1" title="ทำงานทีละขั้น (Step Debug)">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 1.414L10.586 9H7a1 1 0 100 2h3.586l-1.293 1.293a1 1 0 101.414 1.414l3-3a1 1 0 000-1.414z" clip-rule="evenodd"></path></svg> ทีละขั้น
+                    </button>
+                    <button onclick="stopGame()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-bold shadow transition flex items-center gap-1">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd"></path></svg> หยุด/เริ่มใหม่
+                    </button>
+                    <div class="flex items-center gap-2 ml-2 bg-gray-100 px-3 py-1 rounded-lg">
+                        <span class="text-xs font-semibold text-gray-600">ความเร็ว</span>
+                        <input type="range" id="speed-slider" min="100" max="1000" value="400" class="w-20" style="direction: rtl;">
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right: Code/Command Area -->
+        <section class="w-full md:w-1/2 lg:w-2/5 border-l-2 border-gray-200 bg-white flex flex-col h-1/2 md:h-full">
+            
+            <!-- Toolbox -->
+            <div class="p-3 bg-gray-50 border-b border-gray-200 shadow-inner z-10">
+                <h2 class="text-sm font-bold text-gray-600 mb-2 uppercase tracking-wide">บล็อกคำสั่ง (กดเพื่อเพิ่ม)</h2>
+                <div class="flex flex-wrap gap-2">
+                    <button onclick="addCommand('forward')" class="command-block bg-blue-500 text-white px-3 py-2 rounded shadow flex items-center gap-1 text-sm font-bold">
+                        <span>⬆️</span> เดินหน้า
+                    </button>
+                    <button onclick="addCommand('left')" class="command-block bg-purple-500 text-white px-3 py-2 rounded shadow flex items-center gap-1 text-sm font-bold">
+                        <span>↩️</span> เลี้ยวซ้าย
+                    </button>
+                    <button onclick="addCommand('right')" class="command-block bg-purple-500 text-white px-3 py-2 rounded shadow flex items-center gap-1 text-sm font-bold">
+                        <span>↪️</span> เลี้ยวขวา
+                    </button>
+                    <button onclick="addCommand('pick')" class="command-block bg-orange-500 text-white px-3 py-2 rounded shadow flex items-center gap-1 text-sm font-bold">
+                        <span>📦</span> เก็บพัสดุ
+                    </button>
+                    <button onclick="addCommand('drop')" class="command-block bg-green-500 text-white px-3 py-2 rounded shadow flex items-center gap-1 text-sm font-bold">
+                        <span>🎯</span> ส่งพัสดุ
+                    </button>
+                    <button onclick="addCommand('loop')" class="command-block bg-pink-500 text-white px-3 py-2 rounded shadow flex items-center gap-1 text-sm font-bold border-2 border-pink-700">
+                        <span>🔄</span> เริ่มทำซ้ำ
+                    </button>
+                    <button onclick="addCommand('loop_end')" class="command-block bg-gray-500 text-white px-3 py-2 rounded shadow flex items-center gap-1 text-sm font-bold border-2 border-gray-700">
+                        <span>⏹️</span> จบทำซ้ำ
+                    </button>
+                </div>
+            </div>
+
+            <!-- Command Queue -->
+            <div class="flex-1 overflow-y-auto p-4 bg-gray-100 relative">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="text-md font-bold text-gray-700">ลำดับคำสั่ง (กดเพื่อลบ)</h2>
+                    <button onclick="clearCommands()" class="text-xs text-red-500 hover:text-red-700 font-bold underline">ล้างทั้งหมด</button>
+                </div>
+                
+                <div id="command-list" class="flex flex-col gap-1 min-h-[200px] pb-10">
+                    <!-- Commands will be appended here -->
+                    <div class="text-center text-gray-400 text-sm italic mt-10 pointer-events-none" id="empty-cmd-msg">
+                        ยังไม่มีคำสั่ง<br>เลือกบล็อกด้านบนเพื่อจัดเรียง
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Level Editor Toolbar (Hidden by default) -->
+    <div id="editor-toolbar" class="hidden absolute top-20 left-1/2 transform -translate-x-1/2 glass-panel p-2 rounded-xl flex gap-2 z-40 shadow-lg items-center">
+        <span class="text-xs font-bold mr-2">เครื่องมือสร้างด่าน:</span>
+        <button onclick="setEditorBrush(0)" class="w-8 h-8 rounded border-2 border-gray-300 bg-white flex items-center justify-center text-xs" title="ลบ (พื้นที่ว่าง)">⬜</button>
+        <button onclick="setEditorBrush(1)" class="w-8 h-8 rounded border-2 border-gray-300 bg-gray-500 flex items-center justify-center text-xs" title="กำแพง">🧱</button>
+        <button onclick="setEditorBrush(2)" class="w-8 h-8 rounded border-2 border-gray-300 bg-orange-500 flex items-center justify-center text-xs" title="พัสดุ">📦</button>
+        <button onclick="setEditorBrush(3)" class="w-8 h-8 rounded border-2 border-gray-300 bg-green-200 border-dashed border-green-500 flex items-center justify-center text-xs" title="จุดส่ง">🎯</button>
+        <button onclick="setEditorBrush(4)" class="w-8 h-8 rounded border-2 border-gray-300 bg-red-200 flex items-center justify-center text-xs" title="สวิตช์">🔴</button>
+        <button onclick="setEditorBrush(5)" class="w-8 h-8 rounded border-2 border-gray-300 bg-gray-400 flex items-center justify-center text-xs" title="ประตู">🚪</button>
+        <button onclick="setEditorBrush('R')" class="w-8 h-8 rounded border-2 border-blue-500 bg-blue-100 flex items-center justify-center text-xs" title="จุดเริ่มหุ่นยนต์">🤖</button>
+        <div class="h-6 w-px bg-gray-300 mx-1"></div>
+        <button onclick="testCustomLevel()" class="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1 rounded text-xs font-bold">▶️ ทดลองเล่น</button>
+    </div>
+
+    <!-- Result Modal -->
+    <div id="result-modal" class="fixed inset-0 bg-black bg-opacity-60 hidden items-center justify-center z-[100] p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 md:p-8 max-w-sm w-full text-center transform transition-all scale-95" id="result-modal-content">
+            <h2 id="result-title" class="text-3xl font-bold mb-2"></h2>
+            <p id="result-message" class="text-gray-600 mb-4"></p>
+            
+            <div id="result-stars" class="flex justify-center gap-2 mb-6 text-4xl text-gray-300">
+                <span>★</span><span>★</span><span>★</span>
+            </div>
+            
+            <div class="bg-blue-50 rounded-lg p-3 mb-6 text-sm text-left">
+                <p>จำนวนคำสั่งที่ใช้: <strong id="result-count">0</strong> บล็อก</p>
+                <p class="text-gray-500 text-xs mt-1" id="result-optimal">เป้าหมาย 3 ดาว: ใช้ไม่เกิน X บล็อก</p>
+            </div>
+
+            <div class="flex flex-col gap-2">
+                <button onclick="toggleModal('result-modal'); nextLevel();" id="btn-next-level" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-xl shadow transition">
+                    ด่านต่อไป ➡️
+                </button>
+                <button onclick="toggleModal('result-modal'); stopGame();" class="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 px-4 rounded-xl transition">
+                    🔄 ลองใหม่อีกครั้ง
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CT Guide Modal -->
+    <div id="ct-guide-modal" class="fixed inset-0 bg-black bg-opacity-60 hidden items-center justify-center z-[100] p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+            <div class="bg-blue-600 text-white p-4 flex justify-between items-center">
+                <h2 class="text-xl font-bold flex items-center gap-2">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                    แนวคิดเชิงคำนวณ (Computational Thinking)
+                </h2>
+                <button onclick="toggleModal('ct-guide-modal')" class="text-white hover:text-gray-200 font-bold text-xl">&times;</button>
+            </div>
+            <div class="p-4 md:p-6 overflow-y-auto flex-1 text-sm md:text-base text-gray-700 space-y-4">
+                <p>เกม ROBO DELIVERY ออกแบบมาเพื่อฝึกกระบวนการคิด 4 เสาหลักของการคิดเชิงคำนวณ:</p>
+                
+                <div class="border-l-4 border-red-500 pl-4 py-1">
+                    <h3 class="font-bold text-red-600 text-lg">1. Decomposition (การแบ่งย่อยปัญหา)</h3>
+                    <p>การแยกปัญหาใหญ่ให้เป็นส่วนย่อยๆ <br><span class="text-gray-500 italic">ในเกม: แทนที่จะมองว่า "ต้องเอาของไปส่งให้ได้" เราแบ่งเป็นก้าวย่อยๆ คือ เดินหน้า -> เลี้ยวซ้าย -> เก็บของ -> เดินหน้า -> ส่งของ</span></p>
+                </div>
+                
+                <div class="border-l-4 border-yellow-500 pl-4 py-1">
+                    <h3 class="font-bold text-yellow-600 text-lg">2. Pattern Recognition (การหารูปแบบ)</h3>
+                    <p>การหารูปแบบที่ซ้ำกันหรือมีความคล้ายคลึงกัน <br><span class="text-gray-500 italic">ในเกม: การสังเกตว่าต้องทำขั้นตอน "เดินหน้า แล้ว เลี้ยวขวา" ซ้ำกันหลายๆ ครั้งในเส้นทางซิกแซก</span></p>
+                </div>
+                
+                <div class="border-l-4 border-green-500 pl-4 py-1">
+                    <h3 class="font-bold text-green-600 text-lg">3. Abstraction (การคิดเชิงนามธรรม)</h3>
+                    <p>การมุ่งความสนใจไปที่ข้อมูลสำคัญ และตัดรายละเอียดที่ไม่จำเป็นทิ้ง <br><span class="text-gray-500 italic">ในเกม: เราสนใจแค่ตำแหน่งพัสดุและทางเดิน ไม่ต้องสนใจว่าพัสดุคืออะไรหรือหุ่นยนต์สีอะไร มองเป็นเพียงระบบ Grid</span></p>
+                </div>
+                
+                <div class="border-l-4 border-blue-500 pl-4 py-1">
+                    <h3 class="font-bold text-blue-600 text-lg">4. Algorithm Design (การออกแบบอัลกอริทึม)</h3>
+                    <p>การวางลำดับขั้นตอนการแก้ปัญหาที่ชัดเจน <br><span class="text-gray-500 italic">ในเกม: การนำบล็อกคำสั่งมาเรียงต่อกันตั้งแต่ต้นจนจบ เพื่อให้หุ่นยนต์ทำงานได้อย่างถูกต้องและมีประสิทธิภาพที่สุด</span></p>
+                </div>
+
+                <div class="bg-gray-100 p-3 rounded text-sm mt-4">
+                    <strong>💡 คำแนะนำการเล่น (5-Step Learning Loop):</strong><br>
+                    1. สังเกต (Observe) เส้นทาง > 2. วางแผน (Plan) > 3. เรียงคำสั่ง (Arrange) > 4. ทดลองรัน (Test) > 5. แก้ไขข้อผิดพลาด (Debug)
+                </div>
+            </div>
+            <div class="p-4 bg-gray-50 border-t text-right">
+                <button onclick="toggleModal('ct-guide-modal')" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold">เข้าใจแล้ว</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- State Management ---
+        const GRID_SIZE = 8;
+        let mapData = []; // 2D array: 0=empty, 1=wall, 3=dest, 4=switch, 5=door
+        let robot = { x: 0, y: 0, dir: 0, hasPackage: false, startX:0, startY:0, startDir:0 }; 
+        // dir: 0=North(Up), 1=East(Right), 2=South(Down), 3=West(Left)
+        let packages = []; // array of {id, x, y, initialX, initialY, picked, delivered}
+        let switchState = false;
+        
+        let commandQueue = []; // array of objects {id, type, param}
+        let isRunning = false;
+        let runInterval = null;
+        let currentStepIndex = 0;
+        let compiledCommands = [];
+        
+        let currentLevelId = '1';
+        let editorMode = false;
+        let currentBrush = 1; // Wall
+
+        // --- Levels Data ---
+        // 0:Empty, 1:Wall, 3:Dest, 4:Switch, 5:Door
+        const LEVELS = {
+            '1': {
+                name: "Level 1: พื้นฐาน",
+                map: [
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,0,3,0,0,0], // Dest at (4,6)
+                    [0,0,0,0,0,0,0,0]
+                ],
+                robot: {x: 1, y: 6, dir: 1}, // Start facing East
+                packages: [{id: 1, x: 2, y: 6}],
+                optimal: 5, // Fwd, Pick, Fwd, Fwd, Drop
+                stars: [5, 7] // <=5: 3 stars, <=7: 2 stars
+            },
+            '2': {
+                name: "Level 2: หลบหลีก",
+                map: [
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,1,1,0,0,0],
+                    [0,0,0,1,1,0,0,0],
+                    [0,1,0,0,0,0,3,0], // Dest at (6,4)
+                    [0,0,0,1,1,0,0,0],
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0]
+                ],
+                robot: {x: 1, y: 6, dir: 0}, // Face North
+                packages: [{id: 1, x: 1, y: 3}],
+                optimal: 9,
+                stars: [10, 14]
+            },
+            '3': {
+                name: "Level 3: งานเยอะ (2 ชิ้น)",
+                map: [
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,3,0,0,0,3,0], // Dests (2,1), (6,1)
+                    [0,0,0,0,1,0,0,0],
+                    [0,0,1,1,1,1,0,0],
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0]
+                ],
+                robot: {x: 4, y: 6, dir: 0},
+                packages: [{id: 1, x: 2, y: 5}, {id: 2, x: 6, y: 5}],
+                optimal: 20,
+                stars: [22, 28]
+            },
+            '4': {
+                name: "Level 4: กลไกประตู",
+                map: [
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0],
+                    [0,0,0,1,1,1,1,1],
+                    [0,0,4,1,3,0,0,0], // Switch(2,4), Dest(4,4)
+                    [0,0,0,5,0,0,0,0], // Door(3,5)
+                    [0,0,0,1,1,1,1,1],
+                    [0,0,0,0,0,0,0,0]
+                ],
+                robot: {x: 1, y: 5, dir: 1},
+                packages: [{id: 1, x: 5, y: 5}],
+                optimal: 13,
+                stars: [14, 18]
+            },
+            '5': {
+                name: "Level 5: วนซ้ำ (Loop)",
+                map: [
+                    [0,0,0,0,0,0,0,0],
+                    [0,3,0,0,0,0,0,0], // Dest(1,1)
+                    [0,0,0,1,0,0,0,0],
+                    [0,0,1,0,0,0,0,0],
+                    [0,0,0,0,1,0,0,0],
+                    [0,0,0,1,0,0,0,0],
+                    [0,0,0,0,0,1,0,0],
+                    [0,0,0,0,0,0,0,0]
+                ],
+                robot: {x: 6, y: 6, dir: 0},
+                packages: [{id: 1, x: 5, y: 6}], // Pick immediately
+                optimal: 7, // Loop 4x { Fwd, Left, Fwd, Right }, Drop
+                stars: [8, 15]
+            },
+            'editor': {
+                name: "🛠️ Level Editor",
+                map: Array(8).fill().map(()=>Array(8).fill(0)),
+                robot: {x: 0, y: 0, dir: 1},
+                packages: [],
+                optimal: 99,
+                stars: [99, 99]
+            }
+        };
+
+        let customLevelData = JSON.parse(JSON.stringify(LEVELS['editor']));
+
+        // --- STREAMING_CHUNK:Implementing the audio engine... ---
+        const audioSystem = {
+            ctx: null,
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                }
+                if (this.ctx.state === 'suspended') this.ctx.resume();
+            },
+            play(type) {
+                if (!this.ctx) return;
+                const t = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                switch(type) {
+                    case 'move':
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(300, t);
+                        osc.frequency.exponentialRampToValueAtTime(500, t + 0.1);
+                        gain.gain.setValueAtTime(0.1, t);
+                        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+                        osc.start(t); osc.stop(t + 0.1);
+                        break;
+                    case 'turn':
+                        osc.type = 'triangle';
+                        osc.frequency.setValueAtTime(600, t);
+                        gain.gain.setValueAtTime(0.05, t);
+                        gain.gain.linearRampToValueAtTime(0, t + 0.05);
+                        osc.start(t); osc.stop(t + 0.05);
+                        break;
+                    case 'bump':
+                        osc.type = 'sawtooth';
+                        osc.frequency.setValueAtTime(100, t);
+                        osc.frequency.exponentialRampToValueAtTime(50, t + 0.2);
+                        gain.gain.setValueAtTime(0.2, t);
+                        gain.gain.linearRampToValueAtTime(0, t + 0.2);
+                        osc.start(t); osc.stop(t + 0.2);
+                        break;
+                    case 'pick':
+                        osc.type = 'square';
+                        osc.frequency.setValueAtTime(800, t);
+                        osc.frequency.setValueAtTime(1200, t + 0.05);
+                        gain.gain.setValueAtTime(0.1, t);
+                        gain.gain.linearRampToValueAtTime(0, t + 0.1);
+                        osc.start(t); osc.stop(t + 0.1);
+                        break;
+                    case 'drop':
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(1200, t);
+                        osc.frequency.setValueAtTime(800, t + 0.1);
+                        gain.gain.setValueAtTime(0.1, t);
+                        gain.gain.linearRampToValueAtTime(0, t + 0.2);
+                        osc.start(t); osc.stop(t + 0.2);
+                        break;
+                    case 'switch':
+                        osc.type = 'triangle';
+                        osc.frequency.setValueAtTime(400, t);
+                        osc.frequency.linearRampToValueAtTime(800, t + 0.1);
+                        gain.gain.setValueAtTime(0.1, t);
+                        gain.gain.linearRampToValueAtTime(0, t + 0.1);
+                        osc.start(t); osc.stop(t + 0.1);
+                        break;
+                    case 'win':
+                        // Simple arpeggio
+                        [440, 554, 659, 880].forEach((freq, i) => {
+                            const o = this.ctx.createOscillator();
+                            const g = this.ctx.createGain();
+                            o.type = 'sine';
+                            o.connect(g);
+                            g.connect(this.ctx.destination);
+                            o.frequency.value = freq;
+                            g.gain.setValueAtTime(0, t + i*0.15);
+                            g.gain.linearRampToValueAtTime(0.2, t + i*0.15 + 0.05);
+                            g.gain.linearRampToValueAtTime(0, t + i*0.15 + 0.3);
+                            o.start(t + i*0.15); o.stop(t + i*0.15 + 0.3);
+                        });
+                        break;
+                }
+            }
+        };
+
+        // --- STREAMING_CHUNK:Implementing game logic and rendering... ---
+        
+        function initGrid() {
+            const board = document.getElementById('game-board');
+            board.innerHTML = '';
+            
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.id = `cell-${x}-${y}`;
+                    
+                    // Event listener for editor mode
+                    cell.onclick = () => handleCellClick(x, y);
+                    
+                    board.appendChild(cell);
+                }
+            }
+        }
+
+        function loadLevel(levelId) {
+            isRunning = false;
+            if (runInterval) clearTimeout(runInterval);
+
+            currentLevelId = levelId;
+            let levelData = levelId === 'editor' ? customLevelData : LEVELS[levelId];
+            
+            // Deep copy map data
+            mapData = JSON.parse(JSON.stringify(levelData.map));
+            
+            // Set Robot Initial State
+            robot.x = levelData.robot.x;
+            robot.y = levelData.robot.y;
+            robot.dir = levelData.robot.dir;
+            robot.startX = robot.x;
+            robot.startY = robot.y;
+            robot.startDir = robot.dir;
+            robot.hasPackage = false;
+            
+            // Set Packages Initial State
+            packages = JSON.parse(JSON.stringify(levelData.packages)).map(p => ({
+                ...p, initialX: p.x, initialY: p.y, picked: false, delivered: false
+            }));
+
+            switchState = false;
+
+            // UI Updates
+            document.getElementById('level-title').innerText = levelData.name;
+            document.getElementById('level-select').value = levelId;
+            
+            if (levelId === 'editor') {
+                editorMode = true;
+                document.getElementById('editor-toolbar').classList.remove('hidden');
+                document.getElementById('star-display').innerHTML = '🛠️';
+            } else {
+                editorMode = false;
+                document.getElementById('editor-toolbar').classList.add('hidden');
+                document.getElementById('star-display').innerHTML = '';
+            }
+            
+            initGrid();
+            renderMap();
+            renderRobot();
+            renderPackages();
+            
+            if(!editorMode) clearCommands();
+        }
+
+        function renderMap() {
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    const cell = document.getElementById(`cell-${x}-${y}`);
+                    if (!cell) continue;
+                    cell.className = 'cell'; // reset
+                    
+                    let val = mapData[y][x];
+                    if (val === 1) cell.classList.add('wall');
+                    if (val === 3) cell.classList.add('dest');
+                    if (val === 4) cell.classList.add(switchState ? 'switch-active' : 'switch');
+                    if (val === 5) cell.classList.add('door', switchState ? 'door-open' : 'door-closed');
+                }
+            }
+        }
+
+        function getCellSize() {
+            const board = document.getElementById('game-board');
+            return board.clientWidth / GRID_SIZE;
+        }
+
+        function renderRobot() {
+            const rEl = document.getElementById('robot');
+            const pctX = (robot.x / GRID_SIZE) * 100;
+            const pctY = (robot.y / GRID_SIZE) * 100;
+            
+            rEl.style.left = `${pctX}%`;
+            rEl.style.top = `${pctY}%`;
+            rEl.style.width = `${100/GRID_SIZE}%`;
+            rEl.style.height = `${100/GRID_SIZE}%`;
+            
+            // Rotation based on dir (0:N, 1:E, 2:S, 3:W)
+            rEl.style.transform = `rotate(${robot.dir * 90}deg)`;
+            
+            // Package visibility
+            document.getElementById('robot-package').style.display = robot.hasPackage ? 'block' : 'none';
+        }
+
+        function renderPackages() {
+            // Remove old package doms
+            document.querySelectorAll('.pkg-entity').forEach(e => e.remove());
+            
+            const board = document.getElementById('game-board');
+            
+            packages.forEach(p => {
+                if (p.picked) return; // Handled by robot visual
+                
+                const pEl = document.createElement('div');
+                pEl.className = 'entity pkg-entity';
+                pEl.innerHTML = `<div class="package ${p.delivered ? 'opacity-50 border-green-500' : ''}">${p.id}</div>`;
+                
+                const pctX = (p.x / GRID_SIZE) * 100;
+                const pctY = (p.y / GRID_SIZE) * 100;
+                
+                pEl.style.left = `${pctX}%`;
+                pEl.style.top = `${pctY}%`;
+                pEl.style.width = `${100/GRID_SIZE}%`;
+                pEl.style.height = `${100/GRID_SIZE}%`;
+                
+                board.appendChild(pEl);
+            });
+        }
+
+        // --- STREAMING_CHUNK:Implementing Command UI & Queue... ---
+
+        const CMD_LABELS = {
+            forward: '⬆️ เดินหน้า',
+            left: '↩️ เลี้ยวซ้าย',
+            right: '↪️ เลี้ยวขวา',
+            pick: '📦 เก็บพัสดุ',
+            drop: '🎯 ส่งพัสดุ',
+            loop: '🔄 ทำซ้ำ',
+            loop_end: '⏹️ จบทำซ้ำ'
+        };
+        const CMD_COLORS = {
+            forward: 'bg-blue-500', left: 'bg-purple-500', right: 'bg-purple-500',
+            pick: 'bg-orange-500', drop: 'bg-green-500', loop: 'bg-pink-500', loop_end: 'bg-gray-500'
+        };
+
+        function addCommand(type) {
+            audioSystem.init(); // Init audio on first interaction
+            const id = 'cmd_' + Date.now() + Math.floor(Math.random()*1000);
+            let param = null;
+            if (type === 'loop') param = 2; // Default loop count
+
+            commandQueue.push({ id, type, param });
+            updateCommandUI();
+        }
+
+        function removeCommand(index) {
+            if(isRunning) return;
+            commandQueue.splice(index, 1);
+            updateCommandUI();
+        }
+
+        function changeLoopCount(index, e) {
+            e.stopPropagation();
+            if(isRunning) return;
+            let count = commandQueue[index].param;
+            count = count >= 5 ? 2 : count + 1;
+            commandQueue[index].param = count;
+            updateCommandUI();
+        }
+
+        function updateCommandUI() {
+            const list = document.getElementById('command-list');
+            const emptyMsg = document.getElementById('empty-cmd-msg');
+            
+            // Clear current list (except empty msg)
+            Array.from(list.children).forEach(c => {
+                if(c.id !== 'empty-cmd-msg') c.remove();
+            });
+
+            if (commandQueue.length === 0) {
+                emptyMsg.style.display = 'block';
+                return;
+            }
+            
+            emptyMsg.style.display = 'none';
+            
+            let indentLevel = 0;
+
+            commandQueue.forEach((cmd, index) => {
+                const div = document.createElement('div');
+                
+                if (cmd.type === 'loop_end') indentLevel = Math.max(0, indentLevel - 1);
+                
+                div.className = `${CMD_COLORS[cmd.type]} text-white p-2 rounded shadow text-sm font-bold flex justify-between items-center cursor-pointer hover:opacity-90`;
+                div.style.marginLeft = `${indentLevel * 20}px`;
+                div.id = `ui-${cmd.id}`;
+                div.onclick = () => removeCommand(index);
+                
+                let innerHTML = `<span>${CMD_LABELS[cmd.type]}</span>`;
+                
+                if (cmd.type === 'loop') {
+                    innerHTML += `<button onclick="changeLoopCount(${index}, event)" class="bg-white text-pink-600 px-2 rounded-full text-xs hover:bg-gray-200 ml-2" title="เปลี่ยนจำนวนรอบ">${cmd.param} รอบ 🔄</button>`;
+                }
+                
+                div.innerHTML = innerHTML;
+                list.appendChild(div);
+
+                if (cmd.type === 'loop') indentLevel++;
+            });
+        }
+
+        function clearCommands() {
+            if(isRunning) return;
+            commandQueue = [];
+            updateCommandUI();
+        }
+
+        // --- STREAMING_CHUNK:Implementing execution compiler and logic... ---
+
+        function compileCommands(raw) {
+            let compiled = [];
+            let i = 0;
+            while(i < raw.length) {
+                let cmd = raw[i];
+                if (cmd.type === 'loop') {
+                    // Find matching end
+                    let depth = 1;
+                    let endIndex = raw.length;
+                    for (let j = i + 1; j < raw.length; j++) {
+                        if (raw[j].type === 'loop') depth++;
+                        if (raw[j].type === 'loop_end') depth--;
+                        if (depth === 0) { endIndex = j; break; }
+                    }
+                    
+                    let loopBody = raw.slice(i + 1, endIndex);
+                    let compiledBody = compileCommands(loopBody); // recursive
+                    
+                    for (let c = 0; c < cmd.param; c++) {
+                        compiled = compiled.concat(compiledBody);
+                    }
+                    i = endIndex + 1; // Skip past loop_end
+                } else if (cmd.type !== 'loop_end') {
+                    compiled.push(cmd);
+                    i++;
+                } else {
+                    i++; // stray loop end
+                }
+            }
+            return compiled;
+        }
+
+        function startGame() {
+            audioSystem.init();
+            if (isRunning) return;
+            
+            // Reset state
+            resetGameState();
+            
+            compiledCommands = compileCommands(commandQueue);
+            if (compiledCommands.length === 0) return;
+            
+            isRunning = true;
+            currentStepIndex = 0;
+            executeNextStep();
+        }
+
+        function stopGame() {
+            isRunning = false;
+            if (runInterval) clearTimeout(runInterval);
+            resetGameState();
+            document.querySelectorAll('.cmd-active').forEach(e => e.classList.remove('cmd-active'));
+        }
+
+        function resetGameState() {
+            robot.x = robot.startX;
+            robot.y = robot.startY;
+            robot.dir = robot.startDir;
+            robot.hasPackage = false;
+            
+            packages.forEach(p => {
+                p.x = p.initialX;
+                p.y = p.initialY;
+                p.picked = false;
+                p.delivered = false;
+            });
+            
+            switchState = false;
+            
+            renderMap();
+            renderRobot();
+            renderPackages();
+        }
+
+        function stepGame() {
+            audioSystem.init();
+            if (!isRunning) {
+                resetGameState();
+                compiledCommands = compileCommands(commandQueue);
+                if (compiledCommands.length === 0) return;
+                isRunning = true;
+                currentStepIndex = 0;
+            } else {
+                if (runInterval) clearTimeout(runInterval); // pause auto-run
+            }
+            processStep();
+        }
+
+        function executeNextStep() {
+            if (!isRunning) return;
+            let speed = document.getElementById('speed-slider').value;
+            // Invert speed slider value for UX (higher = faster = less delay)
+            let delay = 1100 - speed; 
+            
+            processStep();
+            
+            if (isRunning) {
+                runInterval = setTimeout(executeNextStep, delay);
+            }
+        }
+
+        function processStep() {
+            // Remove previous highlight
+            document.querySelectorAll('.cmd-active').forEach(e => e.classList.remove('cmd-active'));
+
+            if (currentStepIndex >= compiledCommands.length) {
+                isRunning = false;
+                checkWinCondition();
+                return;
+            }
+
+            let cmd = compiledCommands[currentStepIndex];
+            
+            // Highlight current block in UI
+            let uiEl = document.getElementById(`ui-${cmd.id}`);
+            if (uiEl) {
+                uiEl.classList.add('cmd-active');
+                uiEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            // Execute logic
+            let success = true;
+            switch(cmd.type) {
+                case 'forward': success = moveRobot(); break;
+                case 'left': turnRobot(-1); break;
+                case 'right': turnRobot(1); break;
+                case 'pick': success = pickPackage(); break;
+                case 'drop': success = dropPackage(); break;
+            }
+
+            if (!success) {
+                // Collision / Error
+                isRunning = false;
+                if (runInterval) clearTimeout(runInterval);
+                const rEl = document.getElementById('robot');
+                rEl.classList.add('bump-anim');
+                setTimeout(()=>rEl.classList.remove('bump-anim'), 300);
+            } else {
+                checkTriggers();
+                renderRobot();
+                renderPackages();
+            }
+
+            currentStepIndex++;
+        }
+
+        // --- Core Action Logic ---
+        function moveRobot() {
+            let dx = 0, dy = 0;
+            if (robot.dir === 0) dy = -1;
+            else if (robot.dir === 1) dx = 1;
+            else if (robot.dir === 2) dy = 1;
+            else if (robot.dir === 3) dx = -1;
+
+            let nx = robot.x + dx;
+            let ny = robot.y + dy;
+
+            // Bounds check
+            if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) {
+                audioSystem.play('bump'); return false;
+            }
+            
+            let cellVal = mapData[ny][nx];
+            // Wall check
+            if (cellVal === 1) {
+                audioSystem.play('bump'); return false; 
+            }
+            // Closed door check
+            if (cellVal === 5 && !switchState) {
+                audioSystem.play('bump'); return false;
+            }
+
+            robot.x = nx;
+            robot.y = ny;
+            audioSystem.play('move');
+            return true;
+        }
+
+        function turnRobot(dirChange) {
+            robot.dir = (robot.dir + dirChange + 4) % 4;
+            audioSystem.play('turn');
+        }
+
+        function pickPackage() {
+            if (robot.hasPackage) {
+                audioSystem.play('bump'); return false; // Already holding
+            }
+            
+            // Find unpicked package at current loc
+            let pkg = packages.find(p => p.x === robot.x && p.y === robot.y && !p.picked && !p.delivered);
+            if (pkg) {
+                pkg.picked = true;
+                robot.hasPackage = true;
+                audioSystem.play('pick');
+                return true;
+            }
+            
+            audioSystem.play('bump'); return false; // Nothing to pick
+        }
+
+        function dropPackage() {
+            if (!robot.hasPackage) {
+                audioSystem.play('bump'); return false; // Not holding anything
+            }
+
+            // Check if current cell is Dest
+            if (mapData[robot.y][robot.x] === 3) {
+                // Find the package we are holding (simplification: just find the first picked one)
+                let pkg = packages.find(p => p.picked);
+                if (pkg) {
+                    pkg.picked = false;
+                    pkg.delivered = true;
+                    pkg.x = robot.x;
+                    pkg.y = robot.y;
+                    robot.hasPackage = false;
+                    audioSystem.play('drop');
+                    
+                    // Pop animation on cell
+                    let cell = document.getElementById(`cell-${robot.x}-${robot.y}`);
+                    cell.classList.add('success-anim');
+                    setTimeout(()=>cell.classList.remove('success-anim'), 500);
+                    return true;
+                }
+            }
+            
+            audioSystem.play('bump'); return false; // Not at destination
+        }
+
+        function checkTriggers() {
+            // Check switch
+            if (mapData[robot.y][robot.x] === 4) {
+                if (!switchState) {
+                    switchState = true;
+                    audioSystem.play('switch');
+                    renderMap(); // update doors
+                }
+            }
+        }
+
+        function checkWinCondition() {
+            let allDelivered = packages.every(p => p.delivered);
+            
+            if (allDelivered && packages.length > 0) {
+                audioSystem.play('win');
+                showResult(true);
+            } else {
+                // Ran out of commands or stopped
+                if (packages.length > 0) {
+                    showResult(false);
+                }
+            }
+        }
+
+        // --- STREAMING_CHUNK:Finalizing events and Level Editor... ---
+
+        function showResult(isWin) {
+            const modal = document.getElementById('result-modal');
+            const title = document.getElementById('result-title');
+            const msg = document.getElementById('result-message');
+            const countDisplay = document.getElementById('result-count');
+            const optDisplay = document.getElementById('result-optimal');
+            const starContainer = document.getElementById('result-stars');
+            const btnNext = document.getElementById('btn-next-level');
+
+            let levelData = currentLevelId === 'editor' ? customLevelData : LEVELS[currentLevelId];
+            let cmdCount = commandQueue.length;
+            
+            if (isWin) {
+                title.innerText = "🎉 ภารกิจสำเร็จ! 🎉";
+                title.className = "text-3xl font-bold mb-2 text-green-600";
+                msg.innerText = "หุ่นยนต์ส่งพัสดุเรียบร้อยแล้ว";
+                
+                // Calculate Stars
+                let stars = 1;
+                if (cmdCount <= levelData.stars[0]) stars = 3;
+                else if (cmdCount <= levelData.stars[1]) stars = 2;
+                
+                starContainer.innerHTML = '';
+                for(let i=0; i<3; i++) {
+                    starContainer.innerHTML += `<span class="${i < stars ? 'text-yellow-400 drop-shadow-md' : 'text-gray-200'}">★</span>`;
+                }
+
+                // Update UI Main Stars
+                document.getElementById('star-display').innerHTML = starContainer.innerHTML;
+
+                if(currentLevelId === 'editor' || currentLevelId === '5') {
+                     btnNext.style.display = 'none';
+                } else {
+                     btnNext.style.display = 'block';
+                }
+                
+                // Save progress (mock)
+                localStorage.setItem(`robo_level_${currentLevelId}`, stars);
+                
+            } else {
+                title.innerText = "💥 ภารกิจล้มเหลว";
+                title.className = "text-3xl font-bold mb-2 text-red-600";
+                msg.innerText = "หุ่นยนต์ทำงานไม่สำเร็จ ลองตรวจสอบคำสั่งใหม่นะ";
+                starContainer.innerHTML = '<span class="text-gray-200">★</span><span class="text-gray-200">★</span><span class="text-gray-200">★</span>';
+                btnNext.style.display = 'none';
+            }
+
+            countDisplay.innerText = cmdCount;
+            optDisplay.innerText = `เกณฑ์ 3 ดาว: ใช้ไม่เกิน ${levelData.stars[0]} บล็อก`;
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            // Small delay for scale animation
+            setTimeout(() => {
+                document.getElementById('result-modal-content').classList.remove('scale-95');
+                document.getElementById('result-modal-content').classList.add('scale-100');
+            }, 10);
+        }
+
+        function toggleModal(id) {
+            const el = document.getElementById(id);
+            if (el.classList.contains('hidden')) {
+                el.classList.remove('hidden');
+                el.classList.add('flex');
+            } else {
+                el.classList.add('hidden');
+                el.classList.remove('flex');
+                if (id === 'result-modal') {
+                     document.getElementById('result-modal-content').classList.remove('scale-100');
+                     document.getElementById('result-modal-content').classList.add('scale-95');
+                }
+            }
+        }
+
+        function nextLevel() {
+            let next = parseInt(currentLevelId) + 1;
+            if (LEVELS[next.toString()]) {
+                loadLevel(next.toString());
+            }
+        }
+
+        // --- Level Editor Logic ---
+        function setEditorBrush(val) {
+            currentBrush = val;
+            // Visual feedback on buttons
+            document.querySelectorAll('#editor-toolbar button').forEach(b => b.classList.remove('ring-2', 'ring-blue-500', 'ring-offset-2'));
+            event.currentTarget.classList.add('ring-2', 'ring-blue-500', 'ring-offset-2');
+        }
+
+        function handleCellClick(x, y) {
+            if (!editorMode) return;
+            
+            if (currentBrush === 'R') {
+                customLevelData.robot.x = x;
+                customLevelData.robot.y = y;
+                // Click again to rotate
+                if(robot.x === x && robot.y === y) {
+                    customLevelData.robot.dir = (customLevelData.robot.dir + 1) % 4;
+                }
+            } else if (currentBrush === 2) {
+                // Package
+                customLevelData.map[y][x] = 0; // clear ground
+                let existingIdx = customLevelData.packages.findIndex(p => p.x === x && p.y === y);
+                if (existingIdx >= 0) {
+                     customLevelData.packages.splice(existingIdx, 1); // remove if exists
+                } else {
+                     customLevelData.packages.push({id: customLevelData.packages.length + 1, x, y});
+                }
+            } else {
+                // Ground types (0, 1, 3, 4, 5)
+                customLevelData.map[y][x] = currentBrush;
+                // Remove package if ground becomes wall/door
+                if (currentBrush !== 0 && currentBrush !== 3) {
+                     customLevelData.packages = customLevelData.packages.filter(p => p.x !== x || p.y !== y);
+                }
+            }
+            
+            // Re-load the editor state to render
+            loadLevel('editor');
+        }
+
+        function testCustomLevel() {
+            if(customLevelData.packages.length === 0) {
+                alert("ต้องมีพัสดุอย่างน้อย 1 ชิ้น!");
+                return;
+            }
+            let hasDest = false;
+            for(let r of customLevelData.map) if(r.includes(3)) hasDest = true;
+            if(!hasDest) {
+                alert("ต้องมีจุดส่งเป้าหมายอย่างน้อย 1 จุด!");
+                return;
+            }
+            
+            // Set stars logic based on basic manhattan distance
+            let dist = Math.abs(customLevelData.robot.x - customLevelData.packages[0].x) + 
+                       Math.abs(customLevelData.robot.y - customLevelData.packages[0].y);
+            customLevelData.stars = [dist + 5, dist + 10]; 
+            
+            loadLevel('editor');
+            alert("เริ่มจัดเรียงคำสั่งและทดสอบรันได้เลย!");
+        }
+
+        // Initialize
+        window.onload = () => {
+            loadLevel('1');
+            
+            // Handle window resize for dynamic grid
+            window.addEventListener('resize', () => {
+                if(!isRunning) { renderRobot(); renderPackages(); }
+            });
+        };
+
+    </script>
+</body>
+</html>
